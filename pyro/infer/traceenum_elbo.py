@@ -120,7 +120,7 @@ def _compute_model_factors(model_trace, guide_trace):
     return marginal_costs, log_factors, ordering, enum_dims, scale
 
 
-def _compute_dice_elbo(model_trace, guide_trace):
+def _compute_dice_elbo(model_trace, guide_trace, breakout=False):
     # Accumulate marginal model costs.
     marginal_costs, log_factors, ordering, sum_dims, scale = _compute_model_factors(
             model_trace, guide_trace)
@@ -155,7 +155,7 @@ def _compute_dice_elbo(model_trace, guide_trace):
             cost = packed.neg(site["packed"]["log_prob"])
             costs.setdefault(ordering[name], []).append(cost)
 
-    return Dice(guide_trace, ordering).compute_expectation(costs)
+    return Dice(guide_trace, ordering).compute_expectation(costs, breakout)
 
 
 def _make_dist(dist_, logits):

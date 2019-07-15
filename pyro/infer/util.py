@@ -209,7 +209,7 @@ class Dice(object):
 
         return log_factors
 
-    def compute_expectation(self, costs):
+    def compute_expectation(self, costs, breakout=False):
         """
         Returns a differentiable expected cost, summing over costs at given ordinals.
 
@@ -263,7 +263,10 @@ class Dice(object):
                         cost = cost[mask]
                     else:
                         cost, prob = packed.broadcast_all(cost, prob)
-                    expected_cost = expected_cost + scale * torch.tensordot(prob, cost, prob.dim())
+                    if not breakout:
+                        expected_cost = expected_cost + scale * torch.tensordot(prob, cost, prob.dim())
+                    else:
+                        expected_cost = expected_cost + scale * torch.mul(prob, cost).detach().numpy()
 
         LAST_CACHE_SIZE[0] = count_cached_ops(cache)
         return expected_cost
