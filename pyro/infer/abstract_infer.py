@@ -1,12 +1,9 @@
-from __future__ import absolute_import, division, print_function
-
 import numbers
 import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict, defaultdict
 
 import torch
-from six import add_metaclass
 
 import pyro.poutine as poutine
 from pyro.distributions import Categorical, Empirical
@@ -159,8 +156,7 @@ class Marginals(object):
         return self._marginals
 
 
-@add_metaclass(ABCMeta)
-class TracePosterior(object):
+class TracePosterior(object, metaclass=ABCMeta):
     """
     Abstract TracePosterior object from which posterior inference algorithms inherit.
     When run, collects a bag of execution traces from the approximate posterior.

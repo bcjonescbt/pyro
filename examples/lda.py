@@ -16,8 +16,6 @@ Dirichlet distributions [2], avoiding the need for Laplace approximations as in
     "Pathwise gradients beyond the reparametrization trick"
     https://arxiv.org/pdf/1806.01851.pdf
 """
-from __future__ import absolute_import, division, print_function
-
 import argparse
 import functools
 import logging
@@ -137,7 +135,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    assert pyro.__version__.startswith('0.3.3')
+    assert pyro.__version__.startswith('0.3.4')
     parser = argparse.ArgumentParser(description="Amortized Latent Dirichlet Allocation")
     parser.add_argument("-t", "--num-topics", default=8, type=int)
     parser.add_argument("-w", "--num-words", default=1024, type=int)

@@ -1,9 +1,6 @@
-from __future__ import absolute_import, division, print_function
-
 import argparse
 import logging
 import math
-import six
 
 import pandas as pd
 import torch
@@ -362,7 +359,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    assert pyro.__version__.startswith('0.3.3')
+    assert pyro.__version__.startswith('0.3.4')
     parser = argparse.ArgumentParser(description="Baseball batting average using HMC")
     parser.add_argument("-n", "--num-samples", nargs="?", default=200, type=int)
     parser.add_argument("--num-chains", nargs='?', default=4, type=int)
@@ -376,8 +373,7 @@ if __name__ == "__main__":
 
     # work around the error "CUDA error: initialization error" when arg.cuda is False
     # see https://github.com/pytorch/pytorch/issues/2517
-    if six.PY3:
-        torch.multiprocessing.set_start_method("spawn")
+    torch.multiprocessing.set_start_method("spawn")
     pyro.set_rng_seed(args.rng_seed)
     # Enable validation checks
     pyro.enable_validation(__debug__)
