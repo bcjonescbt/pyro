@@ -98,6 +98,20 @@ GammaPoisson
     :undoc-members:
     :show-inheritance:
 
+GaussianHMM
+--------------------
+.. autoclass:: pyro.distributions.GaussianHMM
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+GaussianMRF
+--------------------
+.. autoclass:: pyro.distributions.GaussianMRF
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 GaussianScaleMixture
 ------------------------------------
 .. autoclass:: pyro.distributions.GaussianScaleMixture
@@ -185,6 +199,13 @@ VonMises
 VonMises3D
 ----------
 .. autoclass:: pyro.distributions.VonMises3D
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+ZeroInflatedPoisson
+-------------------
+.. autoclass:: pyro.distributions.ZeroInflatedPoisson
     :members:
     :undoc-members:
     :show-inheritance:
