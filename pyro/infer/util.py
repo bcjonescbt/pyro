@@ -1,6 +1,10 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 import numbers
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 
 import torch
 from opt_einsum import shared_intermediates
@@ -23,6 +27,16 @@ def enable_validation(is_validate):
 
 def is_validation_enabled():
     return _VALIDATION_ENABLED
+
+
+@contextmanager
+def validation_enabled(is_validate=True):
+    old = is_validation_enabled()
+    try:
+        enable_validation(is_validate)
+        yield
+    finally:
+        enable_validation(old)
 
 
 def torch_item(x):
@@ -50,6 +64,16 @@ def torch_exp(x):
         return torch.exp(x)
     else:
         return math.exp(x)
+
+
+def torch_sum(tensor, dims):
+    """
+    Like :func:`torch.sum` but sum out dims only if they exist.
+    """
+    assert all(d < 0 for d in dims)
+    leftmost = -tensor.dim()
+    dims = [d for d in dims if leftmost <= d]
+    return tensor.sum(dims) if dims else tensor
 
 
 def detach_iterable(iterable):
@@ -80,6 +104,19 @@ def get_plate_stacks(trace):
             if node["type"] == "sample" and not site_is_subsample(node)}
 
 
+def get_dependent_plate_dims(sites):
+    """
+    Return a list of dims for plates that are not common to all sites.
+    """
+    plate_sets = [site["cond_indep_stack"]
+                  for site in sites if site["type"] == "sample"]
+    all_plates = set().union(*plate_sets)
+    common_plates = all_plates.intersection(*plate_sets)
+    sum_plates = all_plates - common_plates
+    sum_dims = list(sorted(f.dim for f in sum_plates))
+    return sum_dims
+
+
 class MultiFrameTensor(dict):
     """
     A container for sums of Tensors among different :class:`plate` contexts.
@@ -96,7 +133,7 @@ class MultiFrameTensor(dict):
         summed = downstream_cost.sum_to(target_site["cond_indep_stack"])
     """
     def __init__(self, *items):
-        super(MultiFrameTensor, self).__init__()
+        super().__init__()
         self.add(*items)
 
     def add(self, *items):
@@ -120,7 +157,7 @@ class MultiFrameTensor(dict):
                 if f not in target_frames and value.shape[f.dim] != 1:
                     value = value.sum(f.dim, True)
             while value.shape and value.shape[0] == 1:
-                value.squeeze_(0)
+                value = value.squeeze(0)
             total = value if total is None else total + value
         return total
 
@@ -129,7 +166,32 @@ class MultiFrameTensor(dict):
             '({}, ...)'.format(frames) for frames in self]))
 
 
-class Dice(object):
+def compute_site_dice_factor(site):
+    log_denom = 0
+    log_prob = site["packed"]["score_parts"].score_function  # not scaled by subsampling
+    dims = getattr(log_prob, "_pyro_dims", "")
+    if site["infer"].get("enumerate"):
+        num_samples = site["infer"].get("num_samples")
+        if num_samples is not None:  # site was multiply sampled
+            if not is_identically_zero(log_prob):
+                log_prob = log_prob - log_prob.detach()
+            log_prob = log_prob - math.log(num_samples)
+            if not isinstance(log_prob, torch.Tensor):
+                log_prob = torch.tensor(float(log_prob), device=site["value"].device)
+            log_prob._pyro_dims = dims
+            # I don't know why the following broadcast is needed, but it makes tests pass:
+            log_prob, _ = packed.broadcast_all(log_prob, site["packed"]["log_prob"])
+        elif site["infer"]["enumerate"] == "sequential":
+            log_denom = math.log(site["infer"].get("_enum_total", num_samples))
+    else:  # site was monte carlo sampled
+        if not is_identically_zero(log_prob):
+            log_prob = log_prob - log_prob.detach()
+            log_prob._pyro_dims = dims
+
+    return log_prob, log_denom
+
+
+class Dice:
     """
     An implementation of the DiCE operator compatible with Pyro features.
 
@@ -158,37 +220,21 @@ class Dice(object):
         hashable; the canonical ordinal is a ``frozenset`` of site names.
     """
     def __init__(self, guide_trace, ordering):
-        log_denom = defaultdict(float)  # avoids double-counting when sequentially enumerating
+        log_denoms = defaultdict(float)  # avoids double-counting when sequentially enumerating
         log_probs = defaultdict(list)  # accounts for upstream probabilties
 
         for name, site in guide_trace.nodes.items():
             if site["type"] != "sample":
                 continue
 
-            log_prob = site["packed"]["score_parts"].score_function  # not scaled by subsampling
-            dims = getattr(log_prob, "_pyro_dims", "")
             ordinal = ordering[name]
-            if site["infer"].get("enumerate"):
-                num_samples = site["infer"].get("num_samples")
-                if num_samples is not None:  # site was multiply sampled
-                    if not is_identically_zero(log_prob):
-                        log_prob = log_prob - log_prob.detach()
-                    log_prob = log_prob - math.log(num_samples)
-                    if not isinstance(log_prob, torch.Tensor):
-                        log_prob = torch.tensor(float(log_prob), device=site["value"].device)
-                    log_prob._pyro_dims = dims
-                    # I don't know why the following broadcast is needed, but it makes tests pass:
-                    log_prob, _ = packed.broadcast_all(log_prob, site["packed"]["log_prob"])
-                elif site["infer"]["enumerate"] == "sequential":
-                    log_denom[ordinal] += math.log(site["infer"]["_enum_total"])
-            else:  # site was monte carlo sampled
-                if is_identically_zero(log_prob):
-                    continue
-                log_prob = log_prob - log_prob.detach()
-                log_prob._pyro_dims = dims
-            log_probs[ordinal].append(log_prob)
+            log_prob, log_denom = compute_site_dice_factor(site)
+            if not is_identically_zero(log_prob):
+                log_probs[ordinal].append(log_prob)
+            if not is_identically_zero(log_denom):
+                log_denoms[ordinal] += log_denom
 
-        self.log_denom = log_denom
+        self.log_denom = log_denoms
         self.log_probs = log_probs
 
     def _get_log_factors(self, target_ordinal):

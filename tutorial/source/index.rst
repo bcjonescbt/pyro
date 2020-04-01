@@ -37,6 +37,7 @@ Welcome to Pyro Examples and Tutorials!
    dmm
    air
    ss-vae
+   stable
 
 .. toctree::
    :maxdepth: 2
@@ -47,23 +48,34 @@ Welcome to Pyro Examples and Tutorials!
    gplvm
    bo
    easyguide
+   forecasting_i
+   forecasting_ii
+   forecasting_iii
    tracking_1d
    csis
    RSA-implicature
    RSA-hyperbole
    ekf
+   working_memory
+   elections
+   dirichlet_process_mixture
+   boosting_bbvi	
 
 .. toctree::
    :maxdepth: 2
    :caption: Code Examples:
 
    capture_recapture
+   cevae
    hmm
    lda
    mcmc
+   neutra
    sparse_gamma
    dkl
    einsum
+   forecast_simple
+   timeseries
    smcfilter
 
 

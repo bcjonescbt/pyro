@@ -1,8 +1,32 @@
-import torch
-from torch.distributions import constraints, kl_divergence, register_kl
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
 
-from pyro.distributions.torch_distribution import IndependentConstraint, TorchDistributionMixin
+import torch
+from torch.distributions import constraints
+from torch.distributions.utils import lazy_property
+
+from pyro.distributions.constraints import IndependentConstraint
+from pyro.distributions.torch_distribution import TorchDistributionMixin
 from pyro.distributions.util import sum_rightmost
+
+
+class Beta(torch.distributions.Beta, TorchDistributionMixin):
+    def conjugate_update(self, other):
+        """
+        EXPERIMENTAL.
+        """
+        assert isinstance(other, Beta)
+        concentration1 = self.concentration1 + other.concentration1 - 1
+        concentration0 = self.concentration0 + other.concentration0 - 1
+        updated = Beta(concentration1, concentration0)
+
+        def _log_normalizer(d):
+            x = d.concentration1
+            y = d.concentration0
+            return (x + y).lgamma() - x.lgamma() - y.lgamma()
+
+        log_normalizer = _log_normalizer(self) + _log_normalizer(other) - _log_normalizer(updated)
+        return updated, log_normalizer
 
 
 # This overloads .log_prob() and .enumerate_support() to speed up evaluating
@@ -25,17 +49,67 @@ class Categorical(torch.distributions.Categorical, TorchDistributionMixin):
             if not torch._C._get_tracing_state():
                 assert logits.size(-1 - value.dim()) == 1
             return logits.transpose(-1 - value.dim(), -1).squeeze(-1)
-        return super(Categorical, self).log_prob(value)
+        return super().log_prob(value)
 
     def enumerate_support(self, expand=True):
-        result = super(Categorical, self).enumerate_support(expand=expand)
+        result = super().enumerate_support(expand=expand)
         if not expand:
             result._pyro_categorical_support = id(self)
         return result
 
 
+class Dirichlet(torch.distributions.Dirichlet, TorchDistributionMixin):
+    def conjugate_update(self, other):
+        """
+        EXPERIMENTAL.
+        """
+        assert isinstance(other, Dirichlet)
+        concentration = self.concentration + other.concentration - 1
+        updated = Dirichlet(concentration)
+
+        def _log_normalizer(d):
+            c = d.concentration
+            return c.sum(-1).lgamma() - c.lgamma().sum(-1)
+
+        log_normalizer = _log_normalizer(self) + _log_normalizer(other) - _log_normalizer(updated)
+        return updated, log_normalizer
+
+
+class Gamma(torch.distributions.Gamma, TorchDistributionMixin):
+    def conjugate_update(self, other):
+        """
+        EXPERIMENTAL.
+        """
+        assert isinstance(other, Gamma)
+        concentration = self.concentration + other.concentration - 1
+        rate = self.rate + other.rate
+        updated = Gamma(concentration, rate)
+
+        def _log_normalizer(d):
+            c = d.concentration
+            return d.rate.log() * c - c.lgamma()
+
+        log_normalizer = _log_normalizer(self) + _log_normalizer(other) - _log_normalizer(updated)
+        return updated, log_normalizer
+
+
+class Geometric(torch.distributions.Geometric, TorchDistributionMixin):
+    # TODO: move upstream
+    def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        return (-value - 1) * torch.nn.functional.softplus(self.logits) + self.logits
+
+
 class MultivariateNormal(torch.distributions.MultivariateNormal, TorchDistributionMixin):
     support = IndependentConstraint(constraints.real, 1)  # TODO move upstream
+
+    # TODO: remove this in the PyTorch release > 1.4.0
+    @lazy_property
+    def precision_matrix(self):
+        identity = torch.eye(self.loc.size(-1), device=self.loc.device, dtype=self.loc.dtype)
+        return torch.cholesky_solve(identity, self._unbroadcasted_scale_tril).expand(
+            self._batch_shape + self._event_shape + self._event_shape)
 
 
 class Independent(torch.distributions.Independent, TorchDistributionMixin):
@@ -51,15 +125,33 @@ class Independent(torch.distributions.Independent, TorchDistributionMixin):
     def _validate_args(self, value):
         self.base_dist._validate_args = value
 
+    def conjugate_update(self, other):
+        """
+        EXPERIMENTAL.
+        """
+        n = self.reintepreted_batch_ndims
+        updated, log_normalizer = self.base_dist.conjugate_update(other.to_event(-n))
+        updated = updated.to_event(n)
+        log_normalizer = sum_rightmost(log_normalizer, n)
+        return updated, log_normalizer
 
-@register_kl(Independent, Independent)
-def _kl_independent_independent(p, q):
-    if p.reinterpreted_batch_ndims != q.reinterpreted_batch_ndims:
-        raise NotImplementedError
-    kl = kl_divergence(p.base_dist, q.base_dist)
-    if p.reinterpreted_batch_ndims:
-        kl = sum_rightmost(kl, p.reinterpreted_batch_ndims)
-    return kl
+
+class Uniform(torch.distributions.Uniform, TorchDistributionMixin):
+    def __init__(self, low, high, validate_args=None):
+        self._unbroadcasted_low = low
+        self._unbroadcasted_high = high
+        super().__init__(low, high, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Uniform, _instance)
+        new = super().expand(batch_shape, _instance=new)
+        new._unbroadcasted_low = self._unbroadcasted_low
+        new._unbroadcasted_high = self._unbroadcasted_high
+        return new
+
+    @constraints.dependent_property
+    def support(self):
+        return constraints.interval(self._unbroadcasted_low, self._unbroadcasted_high)
 
 
 # Programmatically load all distributions from PyTorch.

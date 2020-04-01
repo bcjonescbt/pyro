@@ -1,13 +1,15 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
 
 import warnings
 
 import pytest
 import torch
 
-from pyro.ops.stats import (autocorrelation, autocovariance, effective_sample_size, gelman_rubin,
-                            hpdi, pi, quantile, resample, split_gelman_rubin, waic, _cummin,
-                            _fft_next_good_size, fit_generalized_pareto)
-from tests.common import assert_equal, xfail_if_not_implemented
+from pyro.ops.stats import (_cummin, autocorrelation, autocovariance, crps_empirical, effective_sample_size,
+                            fit_generalized_pareto, gelman_rubin, hpdi, pi, quantile, resample, split_gelman_rubin,
+                            waic)
+from tests.common import assert_close, assert_equal, xfail_if_not_implemented
 
 
 @pytest.mark.parametrize('replacement', [True, False])
@@ -137,10 +139,6 @@ def test_statistics_B_ok_with_sample_shape(statistics, sample_shape):
         assert_equal(statistics(a, dim=-1), y.transpose(0, -1))
 
 
-def test_fft_next_good_size():
-    assert_equal(_fft_next_good_size(433), 450)
-
-
 def test_gelman_rubin():
     # only need to test precision for small data
     x = torch.empty(2, 10)
@@ -250,3 +248,17 @@ def test_fit_generalized_pareto(k, sigma, n_samples=5000):
     fit_k, fit_sigma = fit_generalized_pareto(torch.tensor(X))
     assert_equal(k, fit_k, prec=0.02)
     assert_equal(sigma, fit_sigma, prec=0.02)
+
+
+@pytest.mark.parametrize('event_shape', [(), (4,), (3, 2)])
+@pytest.mark.parametrize('num_samples', [1, 2, 3, 4, 10])
+def test_crps_empirical(num_samples, event_shape):
+    truth = torch.randn(event_shape)
+    pred = truth + 0.1 * torch.randn((num_samples,) + event_shape)
+
+    actual = crps_empirical(pred, truth)
+    assert actual.shape == truth.shape
+
+    expected = ((pred - truth).abs().mean(0)
+                - 0.5 * (pred - pred.unsqueeze(1)).abs().mean([0, 1]))
+    assert_close(actual, expected)
