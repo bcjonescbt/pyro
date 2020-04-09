@@ -91,8 +91,10 @@ class CompiledFunction:
                 compiled = ignore_jit_warnings()(compiled)
             with pyro.validation_enabled(False):
                 time_compilation = self.jit_options.pop("time_compilation", False)
+                optimize = self.jit_options.pop("optimize", False)
                 with optional(timed(), time_compilation) as t:
-                    self.compiled[key] = torch.jit.trace(compiled, params_and_args, **self.jit_options)
+                    with torch.jit.optimized_execution(optimize):
+                        self.compiled[key] = torch.jit.trace(compiled, params_and_args, **self.jit_options)
                 if time_compilation:
                     self.compile_time = t.elapsed
         else:
